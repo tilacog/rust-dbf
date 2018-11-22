@@ -1,27 +1,35 @@
 #[macro_use]
 extern crate nom;
 
-
-use std::fmt;
 use nom::*;
-use std::path::Path;
+use std::collections::HashMap;
+use std::fmt;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
-use std::collections::HashMap;
+use std::path::Path;
 
-fn read_bytes<R: Read+Seek>(input: &mut R, start: u64, length: usize) -> Result<Vec<u8>, String> {
+fn read_bytes<R: Read + Seek>(input: &mut R, start: u64, length: usize) -> Result<Vec<u8>, String> {
     //println!("Want to read from start={} for length={} bytes to end={}", start, length, start+length as u64);
     let mut res_vec = vec![0; length];
 
-    try!(input.seek(SeekFrom::Start(start)).map_err(|_| "couldn't seek".to_string()));
+    try!(
+        input
+            .seek(SeekFrom::Start(start))
+            .map_err(|_| "couldn't seek".to_string())
+    );
 
-    try!(input.read_exact(&mut res_vec).map_err(|_| "Couldn't read bytes".to_string()));
+    try!(
+        input
+            .read_exact(&mut res_vec)
+            .map_err(|_| "Couldn't read bytes".to_string())
+    );
     Ok(res_vec)
 }
 
-named!(parse_header<(i32, i16, i16)>,
-   do_parse!(
-       take!(1) >>   // level?
+named!(
+    parse_header<(i32, i16, i16)>,
+    do_parse!(
+        take!(1) >>   // level?
        take!(3) >>   // date last modified
        num_recs: le_i32         >>
        bytes_in_header: le_i16  >>
@@ -35,15 +43,19 @@ named!(parse_header<(i32, i16, i16)>,
        take!(2) >>  // res.
 
        ( (num_recs, bytes_in_header, bytes_in_rec) )
-   )
+    )
 );
 
 fn parse_field_name(i: &[u8]) -> String {
     // TODO this accepts UTF8, when it should only accept ASCII
-    ::std::str::from_utf8(i).unwrap().trim_right_matches('\x00').to_string()
+    ::std::str::from_utf8(i)
+        .unwrap()
+        .trim_right_matches('\x00')
+        .to_string()
 }
 
-named!(parse_field_descriptor<FieldHeader>,
+named!(
+    parse_field_descriptor<FieldHeader>,
     do_parse!(
         // FIXME use convert name to String here
         name: take!(11) >>
@@ -74,18 +86,17 @@ named!(parse_field_descriptor<FieldHeader>,
 );
 
 #[derive(Debug)]
-pub struct DbfFile<R: Read+Seek> {
+pub struct DbfFile<R: Read + Seek> {
     _dbf_file_handle: R,
     _fields: Vec<FieldHeader>,
     _num_recs: u32,
     _bytes_in_rec: u16,
 }
 
-pub struct DbfRecordIterator<R: Read+Seek> {
+pub struct DbfRecordIterator<R: Read + Seek> {
     _dbf_file: DbfFile<R>,
     _next_rec: u32,
 }
-
 
 #[derive(Debug, Clone)]
 pub enum FieldType {
@@ -112,7 +123,6 @@ impl fmt::Display for Field {
     }
 }
 
-
 #[derive(Debug, Clone)]
 pub struct FieldHeader {
     pub name: String,
@@ -130,17 +140,33 @@ impl DbfFile<File> {
     }
 }
 
-impl<R> DbfFile<R> where R: Read+Seek {
-    pub fn open(mut dbf_file: R) -> Self where R: Read+Seek {
+impl<R> DbfFile<R>
+where
+    R: Read + Seek,
+{
+    pub fn open(mut dbf_file: R) -> Self
+    where
+        R: Read + Seek,
+    {
         let header_bytes = read_bytes(&mut dbf_file, 0, 32).unwrap();
-        let (num_recs, bytes_in_header, bytes_in_rec) = parse_header(&header_bytes).to_result().unwrap();
+        let (num_recs, bytes_in_header, bytes_in_rec) =
+            parse_header(&header_bytes).to_result().unwrap();
         // -1 is for the \x0D separator
         // last -1 is maybe because of an off by one error? FIXME
         let num_headers = (bytes_in_header - 1) / 32 - 1;
 
-        let fields: Vec<_> = read_bytes(&mut dbf_file, 32, (num_headers*32) as usize).unwrap().chunks(32).map(|b| parse_field_descriptor(b).to_result().unwrap()).collect();
+        let fields: Vec<_> = read_bytes(&mut dbf_file, 32, (num_headers * 32) as usize)
+            .unwrap()
+            .chunks(32)
+            .map(|b| parse_field_descriptor(b).to_result().unwrap())
+            .collect();
 
-        DbfFile{ _dbf_file_handle: dbf_file, _fields: fields, _num_recs: num_recs as u32, _bytes_in_rec: bytes_in_rec as u16 }
+        DbfFile {
+            _dbf_file_handle: dbf_file,
+            _fields: fields,
+            _num_recs: num_recs as u32,
+            _bytes_in_rec: bytes_in_rec as u16,
+        }
     }
 
     pub fn record(&mut self, rec_id: u32) -> Option<Record> {
@@ -149,11 +175,19 @@ impl<R> DbfFile<R> where R: Read+Seek {
         }
 
         let header_length = (32 + 32 * self._fields.len() + 2) as u64;
-        let bytes = read_bytes(&mut self._dbf_file_handle, header_length + (rec_id as u64*self._bytes_in_rec as u64), self._bytes_in_rec as usize).or_else(|e| {
+        let bytes = read_bytes(
+            &mut self._dbf_file_handle,
+            header_length + (rec_id as u64 * self._bytes_in_rec as u64),
+            self._bytes_in_rec as usize,
+        ).or_else(|e| {
             if rec_id == self._num_recs - 1 {
                 // If there's an error and it's the last record, then for some reason it works if
                 // we take one byte less.
-                read_bytes(&mut self._dbf_file_handle, header_length + (rec_id as u64*self._bytes_in_rec as u64), self._bytes_in_rec as usize - 1)
+                read_bytes(
+                    &mut self._dbf_file_handle,
+                    header_length + (rec_id as u64 * self._bytes_in_rec as u64),
+                    self._bytes_in_rec as usize - 1,
+                )
             } else {
                 Err(e)
             }
@@ -162,18 +196,30 @@ impl<R> DbfFile<R> where R: Read+Seek {
         let mut fields = HashMap::with_capacity(self._fields.len());
 
         for field in self._fields.iter() {
-            let this_field_bytes: Vec<_> = bytes.iter().skip(offset).take(field.field_length as usize).map(|x| x.clone()).collect();
+            let this_field_bytes: Vec<_> = bytes
+                .iter()
+                .skip(offset)
+                .take(field.field_length as usize)
+                .map(|x| x.clone())
+                .collect();
             offset = offset + field.field_length as usize;
 
-            let this_field_ascii = String::from_utf8(this_field_bytes).unwrap().trim().to_owned();
+            let this_field_ascii = String::from_utf8(this_field_bytes)
+                .unwrap()
+                .trim()
+                .to_owned();
 
             // Is this field a Character
             // FIXME gotta be a better way to do this
-            let is_char = match field.field_type { FieldType::Character => true, _ => false };
+            let is_char = match field.field_type {
+                FieldType::Character => true,
+                _ => false,
+            };
 
             // Spec says that a string '*' means NULL, but empty strings are also viewed as null by
             // some software
-            let is_null = this_field_ascii.chars().nth(0) == Some('*') || (this_field_ascii.len() == 0 && is_char );
+            let is_null = this_field_ascii.chars().nth(0) == Some('*')
+                || (this_field_ascii.len() == 0 && is_char);
 
             let value = if is_null {
                 Field::Null
@@ -191,11 +237,14 @@ impl<R> DbfFile<R> where R: Read+Seek {
     }
 
     pub fn records(self) -> DbfRecordIterator<R> {
-        DbfRecordIterator{ _dbf_file: self, _next_rec: 0 }
+        DbfRecordIterator {
+            _dbf_file: self,
+            _next_rec: 0,
+        }
     }
 
     pub fn num_records(&self) -> u32 {
-        return self._num_recs
+        return self._num_recs;
     }
 
     pub fn headers(&self) -> &Vec<FieldHeader> {
@@ -203,13 +252,19 @@ impl<R> DbfFile<R> where R: Read+Seek {
     }
 }
 
-impl<R> DbfRecordIterator<R> where R: Read+Seek {
+impl<R> DbfRecordIterator<R>
+where
+    R: Read + Seek,
+{
     pub fn into_inner(self) -> DbfFile<R> {
         self._dbf_file
     }
 }
 
-impl<R> Iterator for DbfRecordIterator<R> where R: Read+Seek {
+impl<R> Iterator for DbfRecordIterator<R>
+where
+    R: Read + Seek,
+{
     type Item = Record;
 
     fn next(&mut self) -> Option<Record> {
@@ -223,6 +278,9 @@ impl<R> Iterator for DbfRecordIterator<R> where R: Read+Seek {
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        (self._dbf_file._num_recs as usize, Some(self._dbf_file._num_recs as usize))
+        (
+            self._dbf_file._num_recs as usize,
+            Some(self._dbf_file._num_recs as usize),
+        )
     }
 }
