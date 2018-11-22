@@ -226,7 +226,7 @@ where
             } else {
                 match field.field_type {
                     FieldType::Character => Field::Character(this_field_ascii),
-                    FieldType::Numeric => Field::Numeric(this_field_ascii.parse().unwrap()),
+                    FieldType::Numeric => Field::Numeric(this_field_ascii.parse().unwrap_or(0.0)),
                 }
             };
 
